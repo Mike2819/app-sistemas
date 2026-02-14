@@ -54,7 +54,7 @@ const RegisterScreen = () => {
     }
   };
 
-  // Componente auxiliar para Inputs repetitivos
+  // Componente auxiliar para Inputs repetitivos (CORREGIDO)
   const renderInput = (name: keyof RegisterForm, icon: string, placeholder: string, isPassword = false, keyboard: 'default' | 'email-address' | 'phone-pad' = 'default') => (
     <View style={styles.inputGroup}>
       <Text style={styles.label}>{name.charAt(0).toUpperCase() + name.slice(1)}</Text>
@@ -71,9 +71,15 @@ const RegisterScreen = () => {
               onBlur={onBlur}
               onChangeText={onChange}
               value={value}
-              secureTextEntry={isPassword && !showPassword}
+              
+              // ✅ LÓGICA DE SEGURIDAD
+              secureTextEntry={isPassword && !showPassword} 
+              
+              // ✅ CORRECCIÓN: Desactivamos mayúsculas y corrección en passwords
+              autoCapitalize={(name === 'email' || isPassword) ? 'none' : 'words'}
+              autoCorrect={!isPassword} 
+              
               keyboardType={keyboard}
-              autoCapitalize={name === 'email' ? 'none' : 'words'}
             />
             {isPassword && (
               <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
