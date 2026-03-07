@@ -80,7 +80,7 @@ const HomeScreen = () => {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
       
-      {/* HEADER (Intacto) */}
+      {/* HEADER */}
       <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>Hola,</Text>
@@ -109,7 +109,7 @@ const HomeScreen = () => {
         </View>
       </View>
 
-      {/* NUEVO MOTOR DE ASISTENCIA */}
+      {/* MOTOR DE ASISTENCIA */}
       <View style={styles.actionsContainer}>
         <Text style={styles.sectionTitle}>Registro de Asistencia</Text>
         
