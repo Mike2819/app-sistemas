@@ -4,6 +4,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import useAuth from '../../hooks/useAuth';
 import Geolocation from 'react-native-geolocation-service';
 import { isLocationInsideCampus, CAMPUS_POLYGON } from '../../utils/geofence';
+import client from '../../api/client';
 
 const HomeScreen = () => {
   const { user, logout } = useAuth();
@@ -11,6 +12,7 @@ const HomeScreen = () => {
   // Estados del GPS
   const [location, setLocation] = useState<{lat: number, lng: number} | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isInsideCampus, setIsInsideCampus] = useState<boolean | null>(null);
 
@@ -38,9 +40,10 @@ const HomeScreen = () => {
   };
 
   // Función de Checado 
-  const handleCheckIn = async () => {
+  const handleCheckIn = async (tipoRegistro: 'ENTRADA' | 'SALIDA') => {
     setIsLoading(true);
     setErrorMsg(null);
+    setSuccessMsg(null);
 
     const hasPermission = await requestLocationPermission();
 
@@ -51,22 +54,50 @@ const HomeScreen = () => {
     }
 
     Geolocation.getCurrentPosition(
-      (position) => {
-        const currentCoord = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        };
-        
-        setLocation(currentCoord);
-        
-        // Evaluamos si la coordenada actual está dentro del polígono
-        const inside = isLocationInsideCampus(currentCoord, CAMPUS_POLYGON);
-        setIsInsideCampus(inside);
-        
-        if (position.mocked) {
-          setErrorMsg('¡Alerta! Ubicación falsa detectada.');
+      async (position) => {
+        try {
+          const currentCoord = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          };
+          
+          setLocation(currentCoord);
+          
+          // Evaluamos si la coordenada actual está dentro del polígono
+          const inside = isLocationInsideCampus(currentCoord, CAMPUS_POLYGON);
+          setIsInsideCampus(inside);
+          
+          if (position.mocked) {
+            setErrorMsg('¡Alerta! Ubicación falsa detectada.');
+            setIsLoading(false);
+            return;
+          }
+
+          if (!inside) {
+            setErrorMsg('Debes estar dentro del campus (UPA) para registrar asistencia.');
+            setIsLoading(false);
+            return;
+          }
+
+          // Realizamos la petición al backend
+          const timestamp = new Date().toISOString();
+          await client.post('/attendance', {
+            timestamp,
+            tipoRegistro,
+            coordenadas: currentCoord,
+          });
+
+          // Formateamos la hora local para el mensaje de éxito
+          const date = new Date();
+          const hours = date.getHours().toString().padStart(2, '0');
+          const minutes = date.getMinutes().toString().padStart(2, '0');
+          
+          setSuccessMsg(`Registro de ${tipoRegistro.toLowerCase()} exitoso a las ${hours}:${minutes}`);
+        } catch (err: any) {
+          setErrorMsg(err.response?.data?.message || 'Error al conectar con el servidor.');
+        } finally {
+          setIsLoading(false);
         }
-        setIsLoading(false);
       },
       (error) => {
         setErrorMsg(`Error del GPS: ${error.message}`);
@@ -113,26 +144,48 @@ const HomeScreen = () => {
       <View style={styles.actionsContainer}>
         <Text style={styles.sectionTitle}>Registro de Asistencia</Text>
         
-        <TouchableOpacity 
-          style={[styles.checkButton, isLoading && styles.checkButtonDisabled]} 
-          onPress={handleCheckIn}
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <ActivityIndicator color="#fff" size="large" />
-          ) : (
-            <>
-              <Icon name="location-outline" size={32} color="#fff" />
-              <Text style={styles.checkButtonText}>Validar Ubicación</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        <View style={styles.buttonsRow}>
+          <TouchableOpacity 
+            style={[styles.checkButton, styles.checkInButton, isLoading && styles.disabledButton]} 
+            onPress={() => handleCheckIn('ENTRADA')}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <>
+                <Icon name="log-in-outline" size={24} color="#fff" />
+                <Text style={styles.checkButtonText}>ENTRADA</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.checkButton, styles.checkOutButton, isLoading && styles.disabledButton]} 
+            onPress={() => handleCheckIn('SALIDA')}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <>
+                <Icon name="log-out-outline" size={24} color="#fff" />
+                <Text style={styles.checkButtonText}>SALIDA</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
 
         {/* Feedback del Sistema (Unificado) */}
         {errorMsg ? (
           <View style={styles.errorBox}>
             <Icon name="alert-circle-outline" size={20} color="#EF4444" />
             <Text style={styles.errorText}>{errorMsg}</Text>
+          </View>
+        ) : successMsg ? (
+          <View style={styles.successMessage}>
+            <Icon name="checkmark-circle-outline" size={20} color="#059669" />
+            <Text style={styles.successMessageText}>{successMsg}</Text>
           </View>
         ) : location ? (
           <View style={[styles.successBox, { backgroundColor: isInsideCampus ? '#D1FAE5' : '#FEF3C7' }]}>
@@ -181,11 +234,16 @@ const styles = StyleSheet.create({
   badgeText: { color: '#03543F', fontSize: 12, fontWeight: 'bold' },
   actionsContainer: { flex: 1, alignItems: 'center' },
   sectionTitle: { fontSize: 18, fontWeight: '600', color: '#1F2937', marginBottom: 16, alignSelf: 'flex-start' },
-  checkButton: { backgroundColor: '#4F46E5', width: '100%', padding: 20, borderRadius: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', shadowColor: '#4F46E5', shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
-  checkButtonDisabled: { backgroundColor: '#9CA3AF' },
-  checkButtonText: { color: 'white', fontSize: 18, fontWeight: '600', marginLeft: 10 },
+  buttonsRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 12 },
+  checkButton: { flex: 1, padding: 16, borderRadius: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  checkInButton: { backgroundColor: '#4F46E5', shadowColor: '#4F46E5', marginRight: 6 },
+  checkOutButton: { backgroundColor: '#F59E0B', shadowColor: '#F59E0B', marginLeft: 6 },
+  disabledButton: { backgroundColor: '#9CA3AF', shadowColor: '#9CA3AF' },
+  checkButtonText: { color: 'white', fontSize: 16, fontWeight: '600', marginLeft: 8 },
   errorBox: { flexDirection: 'row', backgroundColor: '#FEE2E2', padding: 12, borderRadius: 8, width: '100%', marginTop: 20, alignItems: 'center' },
   errorText: { color: '#B91C1C', marginLeft: 8, fontWeight: '500', flexShrink: 1 },
+  successMessage: { flexDirection: 'row', backgroundColor: '#D1FAE5', padding: 16, borderRadius: 12, width: '100%', marginTop: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#34D399' },
+  successMessageText: { color: '#065F46', fontWeight: 'bold', fontSize: 16, marginLeft: 8 },
   successBox: { flexDirection: 'row', backgroundColor: '#D1FAE5', padding: 16, borderRadius: 12, width: '100%', marginTop: 20, alignItems: 'center' },
   successText: { color: '#065F46', fontWeight: 'bold', fontSize: 16 },
   coordText: { color: '#047857', fontSize: 14, fontFamily: 'monospace', marginTop: 4 },

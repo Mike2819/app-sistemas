@@ -5,6 +5,7 @@ import swaggerUi from "swagger-ui-express";
 import connectDB from "./config/db.js";
 import swaggerSpec from "./config/swagger.js";
 import authRoutes from "./routes/authRoutes.js";
+import attendanceRoutes from "./routes/attendanceRoutes.js";
 
 // Cargar variables de entorno
 dotenv.config();
@@ -18,6 +19,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Rutas
 app.use("/api/auth", authRoutes);
+app.use("/api/attendance", attendanceRoutes);
 
 // Middleware de autenticación básica para Swagger
 const swaggerAuth = (req, res, next) => {
