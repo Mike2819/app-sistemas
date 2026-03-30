@@ -81,18 +81,26 @@ const HomeScreen = () => {
 
           // Realizamos la petición al backend
           const timestamp = new Date().toISOString();
-          await client.post('/attendance', {
+          const response = await client.post('/attendance', {
             timestamp,
             tipoRegistro,
             coordenadas: currentCoord,
           });
 
-          // Formateamos la hora local para el mensaje de éxito
-          const date = new Date();
-          const hours = date.getHours().toString().padStart(2, '0');
-          const minutes = date.getMinutes().toString().padStart(2, '0');
+          // Tomamos el timestamp exacto que guardó la base de datos
+          const serverDate = new Date(response.data.data.timestamp);
+
+          // Formateamos forzando la zona horaria de Aguascalientes (Centro de México)
+          const formatter = new Intl.DateTimeFormat('es-MX', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+            timeZone: 'America/Mexico_City'
+          });
           
-          setSuccessMsg(`Registro de ${tipoRegistro.toLowerCase()} exitoso a las ${hours}:${minutes}`);
+          const horaFormateada = formatter.format(serverDate);
+          
+          setSuccessMsg(`Registro de ${tipoRegistro.toLowerCase()} exitoso a las ${horaFormateada}`);
         } catch (err: any) {
           setErrorMsg(err.response?.data?.message || 'Error al conectar con el servidor.');
         } finally {

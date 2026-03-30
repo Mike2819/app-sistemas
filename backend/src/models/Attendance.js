@@ -26,7 +26,7 @@ const attendanceSchema = new mongoose.Schema({
     },
   },
 }, {
-  timestamps: true, // Esto guardacreatedAt y updatedAt automáticamente
+  timestamps: true, // Esto guarda createdAt y updatedAt automáticamente
 });
 
 const Attendance = mongoose.model("Attendance", attendanceSchema);
