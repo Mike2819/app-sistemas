@@ -17,6 +17,8 @@ export const ENDPOINTS = {
   LOGIN: '/auth/login',
   REGISTER: '/auth/register',
   PROFILE: '/auth/profile',
+  SETUP_PIN: '/auth/setup-pin', 
+  VERIFY_PIN: '/auth/verify-pin',
 };
 
 // AsyncStorage

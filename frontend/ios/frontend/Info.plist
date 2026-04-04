@@ -6,6 +6,10 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
     <string>Necesitamos tu ubicación para validar que te encuentras dentro de la universidad al registrar tu asistencia.</string>
 	
+	<!-- Configuraciones Biométricas para iOS -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>Necesitamos tu Face ID o Touch ID para validar tu identidad al registrar asistencia de forma segura.</string>
+
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

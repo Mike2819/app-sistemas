@@ -1,28 +1,45 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, StatusBar, PermissionsAndroid, Platform, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import useAuth from '../../hooks/useAuth';
 import Geolocation from 'react-native-geolocation-service';
+import ReactNativeBiometrics from 'react-native-biometrics';
+
+import useAuth from '../../hooks/useAuth';
 import { isLocationInsideCampus, CAMPUS_POLYGON } from '../../utils/geofence';
 import client from '../../api/client';
+import { authenticateUser } from '../../utils/biometrics';
+
+// IMPORTACIÓN DE LOS MODALES
+import PinSetupModal from '../../components/forms/PinSetupModal';
+import PinEntryModal from '../../components/forms/PinEntryModal';
 
 const HomeScreen = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUserSession } = useAuth(); 
   
-  // Estados del GPS
+  // Estados de Seguridad
+  const [localHasPin, setLocalHasPin] = useState(user?.hasPin || false);
+  const [showPinSetup, setShowPinSetup] = useState(false);
+  const [showPinEntry, setShowPinEntry] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'ENTRADA' | 'SALIDA' | null>(null);
+
+  // Estados del GPS y UI
   const [location, setLocation] = useState<{lat: number, lng: number} | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isInsideCampus, setIsInsideCampus] = useState<boolean | null>(null);
 
-  // Función para pedir permiso
+  // Sincronizar estado local si el usuario cambia
+  useEffect(() => {
+    setLocalHasPin(user?.hasPin || false);
+  }, [user]);
+
+  // Función para pedir permiso GPS
   const requestLocationPermission = async () => {
     if (Platform.OS === 'ios') {
       const auth = await Geolocation.requestAuthorization('whenInUse');
       return auth === 'granted';
     }
-
     if (Platform.OS === 'android') {
       const granted = await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
@@ -39,8 +56,9 @@ const HomeScreen = () => {
     return false;
   };
 
-  // Función de Checado 
-  const handleCheckIn = async (tipoRegistro: 'ENTRADA' | 'SALIDA') => {
+  // PARTE 1: EL MOTOR DE EJECUCIÓN 
+  const executeCheckIn = async (tipoRegistro: 'ENTRADA' | 'SALIDA') => {
+    // 1. FORZAMOS EL ESTADO DE CARGA Y LIMPIAMOS MENSAJES ANTERIORES
     setIsLoading(true);
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -56,14 +74,9 @@ const HomeScreen = () => {
     Geolocation.getCurrentPosition(
       async (position) => {
         try {
-          const currentCoord = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-          };
-          
+          const currentCoord = { lat: position.coords.latitude, lng: position.coords.longitude };
           setLocation(currentCoord);
           
-          // Evaluamos si la coordenada actual está dentro del polígono
           const inside = isLocationInsideCampus(currentCoord, CAMPUS_POLYGON);
           setIsInsideCampus(inside);
           
@@ -79,28 +92,30 @@ const HomeScreen = () => {
             return;
           }
 
-          // Realizamos la petición al backend
           const timestamp = new Date().toISOString();
+          
+          // Llamada al Backend
           const response = await client.post('/attendance', {
             timestamp,
             tipoRegistro,
             coordenadas: currentCoord,
           });
 
-          // Tomamos el timestamp exacto que guardó la base de datos
+          // 2. FORMATEO DE HORA SEGURO Y ESTÁTICO (UTC-6)
+          // Tomamos la hora oficial del servidor
           const serverDate = new Date(response.data.data.timestamp);
-
-          // Formateamos forzando la zona horaria de Aguascalientes (Centro de México)
-          const formatter = new Intl.DateTimeFormat('es-MX', {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true,
-            timeZone: 'America/Mexico_City'
-          });
           
-          const horaFormateada = formatter.format(serverDate);
+          const mxTime = new Date(serverDate.getTime() - (6 * 60 * 60 * 1000));
           
-          setSuccessMsg(`Registro de ${tipoRegistro.toLowerCase()} exitoso a las ${horaFormateada}`);
+          const horas24 = mxTime.getUTCHours();
+          const minutos = mxTime.getUTCMinutes().toString().padStart(2, '0');
+          
+          // Conversión a formato 12 horas (AM/PM)
+          const ampm = horas24 >= 12 ? 'pm' : 'am';
+          const horas12 = horas24 % 12 || 12;
+          
+          setSuccessMsg(`Registro de ${tipoRegistro.toLowerCase()} exitoso a las ${horas12}:${minutos} ${ampm}`);
+          
         } catch (err: any) {
           setErrorMsg(err.response?.data?.message || 'Error al conectar con el servidor.');
         } finally {
@@ -113,6 +128,45 @@ const HomeScreen = () => {
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
     );
+  };
+
+  // PARTE 2: SEGURIDAD (Árbol de decisiones)
+  const handleCheckIn = async (tipoRegistro: 'ENTRADA' | 'SALIDA') => {
+    setIsLoading(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    // --- MOCK TEMPORAL PARA PRUEBAS (Fuerza el protocolo PIN) ---
+    // const rnBiometrics = new ReactNativeBiometrics();
+    // const { available } = await rnBiometrics.isSensorAvailable();
+    const available = false; 
+    // -----------------------------------------------------------
+
+    if (available) {
+      // Caso A y B: Tiene hardware biométrico (Intentamos validar)
+      const isAuthenticated = await authenticateUser();
+      if (!isAuthenticated) {
+        setErrorMsg('Validación biométrica cancelada o fallida. Configura tu huella en los ajustes del sistema.');
+        setIsLoading(false);
+        return;
+      }
+      // Si pasa la huella, ejecutamos el motor GPS
+      await executeCheckIn(tipoRegistro);
+
+    } else {
+      // Caso C: NO tiene hardware biométrico (Protocolo de Respaldo PIN)
+      if (localHasPin) {
+        // Ya tiene PIN, levantamos el modal de validación
+        setPendingAction(tipoRegistro);
+        setShowPinEntry(true);
+        setIsLoading(false);
+      } else {
+        // No tiene PIN, lo obligamos a crearlo levantando el modal
+        setPendingAction(tipoRegistro);
+        setShowPinSetup(true);
+        setIsLoading(false);
+      }
+    }
   };
 
   return (
@@ -158,9 +212,7 @@ const HomeScreen = () => {
             onPress={() => handleCheckIn('ENTRADA')}
             disabled={isLoading}
           >
-            {isLoading ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
+            {isLoading ? <ActivityIndicator color="#fff" size="small" /> : (
               <>
                 <Icon name="log-in-outline" size={24} color="#fff" />
                 <Text style={styles.checkButtonText}>ENTRADA</Text>
@@ -173,9 +225,7 @@ const HomeScreen = () => {
             onPress={() => handleCheckIn('SALIDA')}
             disabled={isLoading}
           >
-            {isLoading ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
+            {isLoading ? <ActivityIndicator color="#fff" size="small" /> : (
               <>
                 <Icon name="log-out-outline" size={24} color="#fff" />
                 <Text style={styles.checkButtonText}>SALIDA</Text>
@@ -184,7 +234,7 @@ const HomeScreen = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Feedback del Sistema (Unificado) */}
+        {/* Feedback del Sistema */}
         {errorMsg ? (
           <View style={styles.errorBox}>
             <Icon name="alert-circle-outline" size={20} color="#EF4444" />
@@ -202,12 +252,8 @@ const HomeScreen = () => {
               <Text style={{ color: isInsideCampus ? '#065F46' : '#92400E', fontWeight: 'bold', fontSize: 16 }}>
                 {isInsideCampus ? 'Estás dentro de la UPA' : 'Estás fuera de la UPA'}
               </Text>
-              <Text style={[styles.coordText, { color: isInsideCampus ? '#047857' : '#92400E' }]}>
-                Lat: {location.lat.toFixed(6)}
-              </Text>
-              <Text style={[styles.coordText, { color: isInsideCampus ? '#047857' : '#92400E' }]}>
-                Lng: {location.lng.toFixed(6)}
-              </Text>
+              <Text style={[styles.coordText, { color: isInsideCampus ? '#047857' : '#92400E' }]}>Lat: {location.lat.toFixed(6)}</Text>
+              <Text style={[styles.coordText, { color: isInsideCampus ? '#047857' : '#92400E' }]}>Lng: {location.lng.toFixed(6)}</Text>
             </View>
           </View>
         ) : null}
@@ -220,6 +266,36 @@ const HomeScreen = () => {
             <Text style={styles.logoutText}>Cerrar Sesión</Text>
         </TouchableOpacity>
       </View>
+
+      {/* MODAL DE CONFIGURACIÓN DE PIN */}
+      <PinSetupModal 
+        visible={showPinSetup}
+        onSuccess={async () => {
+          setShowPinSetup(false);
+          setLocalHasPin(true);
+          
+          await updateUserSession({ hasPin: true }); 
+          
+          setSuccessMsg('PIN de seguridad configurado. Vuelve a presionar ENTRADA/SALIDA para registrarte.');
+        }}
+      />
+
+      {/* MODAL DE VERIFICACIÓN DE PIN */}
+      <PinEntryModal 
+        visible={showPinEntry}
+        onCancel={() => {
+          setShowPinEntry(false);
+          setPendingAction(null);
+        }}
+        onSuccess={() => {
+          setShowPinEntry(false);
+          // Identidad confirmada. Disparamos el GPS y guardamos la asistencia
+          if (pendingAction) {
+            executeCheckIn(pendingAction);
+            setPendingAction(null);
+          }
+        }}
+      />
 
     </SafeAreaView>
   );

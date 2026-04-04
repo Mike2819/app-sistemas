@@ -32,6 +32,12 @@ const userSchema = new mongoose.Schema(
       minlength: [6, "La contraseña debe tener al menos 6 caracteres"],
       select: false, // No incluir password en las consultas por defecto
     },
+  // NUEVO CAMPO:
+    pin: {
+      type: String,
+      required: false, // Es falso porque se configura después de crear la cuenta
+      maxlength: 60, // Para soportar el hash de bcrypt
+    },
   },
   {
     timestamps: true,

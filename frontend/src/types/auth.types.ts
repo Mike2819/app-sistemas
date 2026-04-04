@@ -6,6 +6,7 @@ export interface User {
   email: string;
   telefono?: string;
   rol?: string;
+  hasPin?: boolean; // Indica si ya configuró su soft-token
 }
 
 // Definimos la respuesta de la API

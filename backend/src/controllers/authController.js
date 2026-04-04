@@ -1,5 +1,47 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import bcrypt from "bcryptjs";
+
+// @desc    Configurar el PIN de 4 dígitos por primera vez
+// @route   POST /api/auth/setup-pin
+// @access  Privado (requiere token JWT)
+export const setupPin = async (req, res) => {
+  try {
+    const { pin } = req.body;
+
+    // Validación estricta: Solo 4 números
+    if (!pin || !/^\d{4}$/.test(pin)) {
+      return res.status(400).json({
+        success: false,
+        message: "El PIN debe ser exactamente de 4 dígitos numéricos.",
+      });
+    }
+
+    // Encriptamos el PIN 
+    const salt = await bcrypt.genSalt(10);
+    const hashedPin = await bcrypt.hash(pin, salt);
+
+    // Actualizamos al usuario que hizo la petición
+    const user = await User.findByIdAndUpdate(
+      req.user._id, 
+      { pin: hashedPin },
+      { new: true } // Retorna el documento actualizado
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "PIN de seguridad configurado correctamente.",
+      hasPin: true
+    });
+
+  } catch (error) {
+    console.error(`Error en setupPin: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: "Error en el servidor al configurar el PIN.",
+    });
+  }
+};
 
 // Generar JWT
 const generateToken = (id) => {
@@ -46,6 +88,7 @@ const register = async (req, res) => {
         email: user.email,
         telefono: user.telefono,
         token,
+        hasPin: false,
       },
     });
   } catch (error) {
@@ -113,6 +156,7 @@ const login = async (req, res) => {
         email: user.email,
         telefono: user.telefono,
         token,
+        hasPin: !!user.pin
       },
     });
   } catch (error) {
@@ -138,6 +182,7 @@ const getProfile = async (req, res) => {
         apellidos: user.apellidos,
         email: user.email,
         telefono: user.telefono,
+        hasPin: !!user.pin
       },
     });
   } catch (error) {
@@ -145,6 +190,39 @@ const getProfile = async (req, res) => {
       success: false,
       message: "Error en el servidor",
     });
+  }
+};
+
+// @desc    Verificar el PIN de 4 dígitos para registrar asistencia
+// @route   POST /api/auth/verify-pin
+// @access  Privado
+export const verifyPin = async (req, res) => {
+  try {
+    const { pin } = req.body;
+
+    if (!pin) {
+      return res.status(400).json({ success: false, message: "Por favor ingresa tu PIN." });
+    }
+
+    const user = await User.findById(req.user._id);
+
+    // Si por alguna razón no tiene PIN en la BD, bloqueamos
+    if (!user.pin) {
+      return res.status(400).json({ success: false, message: "No tienes un PIN configurado." });
+    }
+
+    // Comparamos el PIN ingresado con el Hash de la base de datos
+    const isMatch = await bcrypt.compare(pin, user.pin);
+
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: "PIN incorrecto. Intenta de nuevo." });
+    }
+
+    res.status(200).json({ success: true, message: "Identidad verificada correctamente." });
+
+  } catch (error) {
+    console.error(`Error en verifyPin: ${error.message}`);
+    res.status(500).json({ success: false, message: "Error en el servidor al verificar el PIN." });
   }
 };
 

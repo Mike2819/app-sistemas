@@ -11,6 +11,7 @@ interface AuthContextType {
   login: (data: LoginPayload) => Promise<void>;
   register: (data: any) => Promise<void>;
   logout: () => Promise<void>;
+  updateUserSession: (updates: Partial<User>) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType>({} as AuthContextType);
@@ -88,6 +89,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // ACTUALIZAR SESIÓN (Memoria Local)
+  const updateUserSession = async (updates: Partial<User>) => {
+    if (user) {
+      const updatedUser = { ...user, ...updates };
+      setUser(updatedUser); // Actualiza el estado de React en tiempo real
+      await AsyncStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(updatedUser)); // Guarda en disco
+    }
+  };
+
   // LOGOUT
   const logout = async () => {
     setIsLoading(true);
@@ -105,7 +115,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout, updateUserSession }}>
       {children}
     </AuthContext.Provider>
   );
