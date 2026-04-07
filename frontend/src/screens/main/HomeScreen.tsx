@@ -5,9 +5,11 @@ import Geolocation from 'react-native-geolocation-service';
 import ReactNativeBiometrics from 'react-native-biometrics';
 
 import useAuth from '../../hooks/useAuth';
+import useNetwork from '../../hooks/useNetwork';
 import { isLocationInsideCampus, CAMPUS_POLYGON } from '../../utils/geofence';
 import client from '../../api/client';
 import { authenticateUser } from '../../utils/biometrics';
+import { saveOfflineRecord, syncOfflineRecords } from '../../api/attendance';
 
 // IMPORTACIÓN DE LOS MODALES
 import PinSetupModal from '../../components/forms/PinSetupModal';
@@ -15,6 +17,7 @@ import PinEntryModal from '../../components/forms/PinEntryModal';
 
 const HomeScreen = () => {
   const { user, logout, updateUserSession } = useAuth(); 
+  const { isConnected } = useNetwork(); 
   
   // Estados de Seguridad
   const [localHasPin, setLocalHasPin] = useState(user?.hasPin || false);
@@ -28,6 +31,30 @@ const HomeScreen = () => {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isInsideCampus, setIsInsideCampus] = useState<boolean | null>(null);
+
+  // EFECTO DE SINCRONIZACIÓN AUTOMÁTICA
+  useEffect(() => {
+    const checkAndSync = async () => {
+      // Si el Vigía detecta internet, intentamos sincronizar
+      if (isConnected) {
+        try {
+          const count = await syncOfflineRecords();
+          if (count > 0) {
+            setSuccessMsg(`¡Conexión recuperada! Se sincronizaron ${count} registro(s) pendiente(s).`);
+            
+            // Limpiamos el mensaje de éxito después de 5 segundos para no saturar la UI
+            setTimeout(() => {
+              setSuccessMsg(null);
+            }, 5000);
+          }
+        } catch (error) {
+          setErrorMsg('Error al intentar sincronizar los registros pendientes.');
+        }
+      }
+    };
+
+    checkAndSync();
+  }, [isConnected]); // Este array hace que el código se ejecute cada vez que el estado de la red cambia
 
   // Sincronizar estado local si el usuario cambia
   useEffect(() => {
@@ -86,31 +113,52 @@ const HomeScreen = () => {
             return;
           }
 
+
           if (!inside) {
             setErrorMsg('Debes estar dentro del campus (UPA) para registrar asistencia.');
             setIsLoading(false);
             return;
           }
 
+          // CAPTURAMOS LA HORA EXACTA DEL CLIC
           const timestamp = new Date().toISOString();
           
-          // Llamada al Backend
+          // EVALUACIÓN DE RED: ¿Estamos offline?
+          if (!isConnected) {
+            // Guardamos en la Bóveda (El timestamp se guarda en UTC absoluto por estándar)
+            await saveOfflineRecord({
+              timestamp,
+              tipoRegistro,
+              coordenadas: currentCoord,
+            });
+
+            // Formateo visual estricto (UTC-6) ignorando la zona horaria del emulador
+            const utcDate = new Date(timestamp);
+            const mxTime = new Date(utcDate.getTime() - (6 * 60 * 60 * 1000));
+            
+            const horas24 = mxTime.getUTCHours();
+            const minutos = mxTime.getUTCMinutes().toString().padStart(2, '0');
+            const ampm = horas24 >= 12 ? 'pm' : 'am';
+            const horas12 = horas24 % 12 || 12;
+            
+            setSuccessMsg(`Registro offline guardado a las ${horas12}:${minutos} ${ampm}. Se sincronizará en breve.`);
+            setIsLoading(false);
+            return; // Cortamos la ejecución aquí
+          }
+
+          // SI HAY INTERNET, FLUJO NORMAL AL BACKEND 
           const response = await client.post('/attendance', {
             timestamp,
             tipoRegistro,
             coordenadas: currentCoord,
           });
 
-          // 2. FORMATEO DE HORA SEGURO Y ESTÁTICO (UTC-6)
-          // Tomamos la hora oficial del servidor
+          // Formateo visual estático (UTC-6) basado en el servidor
           const serverDate = new Date(response.data.data.timestamp);
-          
           const mxTime = new Date(serverDate.getTime() - (6 * 60 * 60 * 1000));
           
           const horas24 = mxTime.getUTCHours();
           const minutos = mxTime.getUTCMinutes().toString().padStart(2, '0');
-          
-          // Conversión a formato 12 horas (AM/PM)
           const ampm = horas24 >= 12 ? 'pm' : 'am';
           const horas12 = horas24 % 12 || 12;
           
@@ -137,9 +185,9 @@ const HomeScreen = () => {
     setSuccessMsg(null);
 
     // --- MOCK TEMPORAL PARA PRUEBAS (Fuerza el protocolo PIN) ---
-    // const rnBiometrics = new ReactNativeBiometrics();
-    // const { available } = await rnBiometrics.isSensorAvailable();
-    const available = false; 
+    const rnBiometrics = new ReactNativeBiometrics();
+    const { available } = await rnBiometrics.isSensorAvailable();
+    // const available = false; 
     // -----------------------------------------------------------
 
     if (available) {

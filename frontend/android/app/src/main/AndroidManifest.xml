@@ -9,6 +9,9 @@
     <!-- Permisos de biometría -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
+    <!-- Permisos de red -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <application
       android:name=".MainApplication"
       android:label="@string/app_name"

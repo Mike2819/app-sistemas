@@ -4,7 +4,7 @@ export const registerAttendance = async (req, res) => {
   try {
     const { timestamp, tipoRegistro, coordenadas } = req.body;
 
-    // Validaciones estructurales (Evita que el servidor crashee)
+    // Validaciones estructurales
     if (!timestamp || !tipoRegistro) {
       return res.status(400).json({
         success: false,
@@ -23,13 +23,17 @@ export const registerAttendance = async (req, res) => {
 
     const docenteId = req.user._id;
 
-    // Lógica Anti-Doble Checada
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0); // Ajustamos a las 00:00:00 de hoy
+    // EVALUACIÓN RELATIVA AL EVENTO
+    // Convertimos el string enviado por el celular a un objeto Date
+    const fechaDelEvento = new Date(timestamp);
+    
+    // Creamos el límite de inicio de día (00:00:00) basado en el evento, NO en el servidor
+    const inicioDeEseDia = new Date(fechaDelEvento);
+    inicioDeEseDia.setHours(0, 0, 0, 0);
 
     const ultimoRegistro = await Attendance.findOne({
       docenteId,
-      timestamp: { $gte: hoy }
+      timestamp: { $gte: inicioDeEseDia } // Buscamos conflictos en el mismo día del evento
     }).sort({ timestamp: -1 });
 
     if (ultimoRegistro && ultimoRegistro.tipoRegistro === tipo) {
@@ -39,10 +43,10 @@ export const registerAttendance = async (req, res) => {
       });
     }
 
-    // Guardado en Base de Datos
+    // Guardado en Base de Datos: La hora absoluta es inyectada con éxito
     const newAttendance = new Attendance({
       docenteId,
-      timestamp: new Date(timestamp),
+      timestamp: fechaDelEvento,
       tipoRegistro: tipo,
       coordenadas: coordenadas || undefined,
     });
@@ -56,7 +60,6 @@ export const registerAttendance = async (req, res) => {
     });
     
   } catch (error) {
-    // Debug
     console.error(`Error CRÍTICO en registerAttendance: ${error.message}`);
     res.status(500).json({
       success: false,
